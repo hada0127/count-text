@@ -311,9 +311,10 @@ class DocumentTextCounter {
             const processedImage = await this.preprocessImageForOCR(normalizedImage);
 
             // 3. Tesseract OCR 실행
+            // 지원 언어: 한국어, 영어, 아랍어, 일본어, 중국어(간체/번체), 스페인어, 프랑스어, 독일어, 러시아어, 포르투갈어, 이탈리아어, 베트남어, 태국어, 힌디어
             const result = await Tesseract.recognize(
                 processedImage,
-                'kor+eng',
+                'kor+eng+ara+jpn+chi_sim+chi_tra+spa+fra+deu+rus+por+ita+vie+tha+hin',
                 {
                     logger: () => {},
                     tessedit_pageseg_mode: '3',
