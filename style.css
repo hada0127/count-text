@@ -204,6 +204,8 @@ body {
     color: var(--color-text-body);
     cursor: pointer;
     transition: all 0.2s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .language-option:hover {
