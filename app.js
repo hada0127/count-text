@@ -13,12 +13,17 @@ class DocumentTextCounter {
         this.errorMessage = document.getElementById('errorMessage');
         this.slidesContainer = document.getElementById('slidesContainer');
         this.sectionTitle = document.getElementById('sectionTitle');
+        this.languageGrid = document.getElementById('languageGrid');
 
         this.imageFormats = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'webp'];
         this.supportedFormats = ['pptx', 'docx', 'xlsx', 'pdf', 'txt', ...this.imageFormats];
         this.oldFormats = ['ppt', 'doc', 'xls'];
 
+        // 기본 언어: 한국어, 영어
+        this.defaultLanguages = ['kor', 'eng'];
+
         this.initEventListeners();
+        this.loadLanguageSettings();
     }
 
     initEventListeners() {
@@ -46,6 +51,37 @@ class DocumentTextCounter {
                 this.handleFile(e.dataTransfer.files[0]);
             }
         });
+
+        // 언어 선택 변경 시 저장
+        this.languageGrid.addEventListener('change', () => {
+            this.saveLanguageSettings();
+        });
+    }
+
+    // 언어 설정 로드
+    loadLanguageSettings() {
+        const saved = localStorage.getItem('ocrLanguages');
+        const languages = saved ? JSON.parse(saved) : this.defaultLanguages;
+
+        // 모든 체크박스 초기화
+        const checkboxes = this.languageGrid.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(checkbox => {
+            checkbox.checked = languages.includes(checkbox.value);
+        });
+    }
+
+    // 언어 설정 저장
+    saveLanguageSettings() {
+        const languages = this.getSelectedLanguages();
+        localStorage.setItem('ocrLanguages', JSON.stringify(languages));
+    }
+
+    // 선택된 언어 가져오기
+    getSelectedLanguages() {
+        const checkboxes = this.languageGrid.querySelectorAll('input[type="checkbox"]:checked');
+        const languages = Array.from(checkboxes).map(cb => cb.value);
+        // 최소 1개 이상 선택되어야 함
+        return languages.length > 0 ? languages : this.defaultLanguages;
     }
 
     async handleFile(file) {
@@ -310,11 +346,13 @@ class DocumentTextCounter {
             // 2. 이미지 전처리 (그레이스케일 + 대비 + 이진화)
             const processedImage = await this.preprocessImageForOCR(normalizedImage);
 
-            // 3. Tesseract OCR 실행
-            // 지원 언어: 한국어, 영어, 아랍어, 일본어, 중국어(간체/번체), 스페인어, 프랑스어, 독일어, 러시아어, 포르투갈어, 이탈리아어, 베트남어, 태국어, 힌디어
+            // 3. Tesseract OCR 실행 (선택된 언어만 사용)
+            const selectedLanguages = this.getSelectedLanguages();
+            const langString = selectedLanguages.join('+');
+
             const result = await Tesseract.recognize(
                 processedImage,
-                'kor+eng+ara+jpn+chi_sim+chi_tra+spa+fra+deu+rus+por+ita+vie+tha+hin',
+                langString,
                 {
                     logger: () => {},
                     tessedit_pageseg_mode: '3',

@@ -172,6 +172,54 @@ body {
     display: block;
 }
 
+.ocr-settings {
+    margin-top: 24px;
+    padding: 16px;
+    background: var(--color-bg-elevation);
+    border-radius: 12px;
+}
+
+.ocr-settings-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--color-text-header);
+    margin-bottom: 12px;
+}
+
+.language-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 8px;
+}
+
+.language-option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--color-bg-block);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: var(--color-text-body);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.language-option:hover {
+    border-color: var(--color-primary);
+}
+
+.language-option:has(input:checked) {
+    background: var(--color-primary-fill);
+    border-color: var(--color-primary);
+}
+
+.language-option input[type="checkbox"] {
+    accent-color: var(--color-primary);
+    cursor: pointer;
+}
+
 .results-card {
     display: none;
     background: var(--color-bg-block);
