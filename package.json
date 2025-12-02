@@ -1,0 +1,15 @@
+{
+  "name": "count-text-ppt",
+  "version": "1.0.0",
+  "description": "PPT/PPTX 파일의 글자수를 세는 웹 애플리케이션",
+  "scripts": {
+    "start": "npx http-server -p 8080 -c-1"
+  },
+  "keywords": [
+    "ppt",
+    "pptx",
+    "ocr",
+    "text-count"
+  ],
+  "license": "MIT"
+}
