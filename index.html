@@ -3,7 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>문서 글자수 카운터</title>
+    <title>문서 글자수 카운터 - PPT, Word, PDF 글자수 세기 | 무료 온라인 도구</title>
+    <meta name="description" content="PPT, Word, Excel, PDF, TXT, 이미지 파일의 글자수를 무료로 계산하세요. OCR로 이미지 내 텍스트도 자동 인식. 서버 업로드 없이 브라우저에서 안전하게 처리됩니다.">
+    <meta name="keywords" content="글자수 세기, 글자수 카운터, PPT 글자수, PDF 글자수, Word 글자수, 문자수 세기, OCR, 텍스트 추출, 무료 온라인 도구">
+    <meta name="author" content="hada0127">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://github.com/hada0127/count-text">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="문서 글자수 카운터 - PPT, Word, PDF 글자수 세기">
+    <meta property="og:description" content="PPT, Word, Excel, PDF, 이미지 파일의 글자수를 무료로 계산. OCR로 이미지 내 텍스트도 자동 인식.">
+    <meta property="og:locale" content="ko_KR">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="문서 글자수 카운터">
+    <meta name="twitter:description" content="PPT, Word, Excel, PDF 글자수 무료 계산. 이미지 OCR 지원.">
+
     <!-- Podo UI CSS (CDN) -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/hada0127/podo-ui@main/cdn/podo-ui.min.css">
     <style>
@@ -49,6 +66,7 @@
         .badge-docx { background: #2b579a; color: white; }
         .badge-xlsx { background: #217346; color: white; }
         .badge-pdf { background: #f40f02; color: white; }
+        .badge-txt { background: #6b7280; color: white; }
         .badge-img { background: var(--color-primary); color: white; }
 
         .privacy-note {
@@ -125,6 +143,7 @@
         .file-type-docx { background: #2b579a; }
         .file-type-xlsx { background: #217346; }
         .file-type-pdf { background: #f40f02; }
+        .file-type-txt { background: #6b7280; }
         .file-type-img { background: var(--color-primary); }
 
         .progress-section {
@@ -300,6 +319,24 @@
             word-break: break-all;
         }
 
+        .footer {
+            text-align: center;
+            margin-top: 32px;
+            padding: 16px;
+            color: var(--color-text-sub);
+            font-size: 0.85rem;
+        }
+
+        .footer a {
+            color: var(--color-text-sub);
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            color: var(--color-primary);
+            text-decoration: underline;
+        }
+
         @media (max-width: 640px) {
             .summary-grid {
                 grid-template-columns: 1fr;
@@ -325,6 +362,7 @@
                 <span class="badge badge-docx">DOCX</span>
                 <span class="badge badge-xlsx">XLSX</span>
                 <span class="badge badge-pdf">PDF</span>
+                <span class="badge badge-txt">TXT</span>
                 <span class="badge badge-img">이미지</span>
             </div>
             <p class="privacy-note">모든 파일은 브라우저에서만 처리되며, 서버에 업로드되지 않습니다.</p>
@@ -338,7 +376,7 @@
                     <span>클릭하여 파일 선택</span>
                 </p>
             </div>
-            <input type="file" id="fileInput" accept=".ppt,.pptx,.doc,.docx,.xls,.xlsx,.pdf,.png,.jpg,.jpeg,.gif,.bmp,.tiff,.webp">
+            <input type="file" id="fileInput" accept=".ppt,.pptx,.doc,.docx,.xls,.xlsx,.pdf,.txt,.png,.jpg,.jpeg,.gif,.bmp,.tiff,.webp">
 
             <div class="file-info" id="fileInfo">
                 <span class="file-type-badge" id="fileTypeIcon"></span>
@@ -374,6 +412,10 @@
             <h3 class="section-title" id="sectionTitle">상세 정보</h3>
             <div id="slidesContainer"></div>
         </div>
+
+        <footer class="footer">
+            <a href="https://github.com/hada0127/count-text" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </footer>
     </div>
 
     <!-- JSZip for Office file parsing -->

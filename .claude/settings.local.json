@@ -3,7 +3,9 @@
     "allow": [
       "Bash(python -m http.server:*)",
       "Bash(npm view:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(chcp 65001)",
+      "Bash(echo:*)"
     ],
     "deny": [],
     "ask": []

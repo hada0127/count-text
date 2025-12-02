@@ -15,7 +15,7 @@ class DocumentTextCounter {
         this.sectionTitle = document.getElementById('sectionTitle');
 
         this.imageFormats = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'webp'];
-        this.supportedFormats = ['pptx', 'docx', 'xlsx', 'pdf', ...this.imageFormats];
+        this.supportedFormats = ['pptx', 'docx', 'xlsx', 'pdf', 'txt', ...this.imageFormats];
         this.oldFormats = ['ppt', 'doc', 'xls'];
 
         this.initEventListeners();
@@ -89,6 +89,9 @@ class DocumentTextCounter {
             } else if (ext === 'pdf') {
                 results = await this.analyzePDF(file);
                 this.sectionTitle.textContent = '페이지별 상세 정보';
+            } else if (ext === 'txt') {
+                results = await this.analyzeTXT(file);
+                this.sectionTitle.textContent = '텍스트 파일 정보';
             } else if (this.imageFormats.includes(ext)) {
                 results = await this.analyzeImage(file);
                 this.sectionTitle.textContent = '이미지 분석 결과';
@@ -99,6 +102,179 @@ class DocumentTextCounter {
             this.showError(`파일 분석 중 오류가 발생했습니다: ${error.message}`);
             this.progressSection.classList.remove('show');
         }
+    }
+
+    // ============ 이미지 전처리 함수 ============
+    async preprocessImageForOCR(imageData) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+
+                // 이미지 크기 설정
+                canvas.width = img.width;
+                canvas.height = img.height;
+
+                // 원본 이미지 그리기
+                ctx.drawImage(img, 0, 0);
+
+                // 이미지 데이터 가져오기
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageData.data;
+
+                // 1. 그레이스케일 변환 + 대비 향상
+                const contrastFactor = 1.5; // 대비 증가 계수
+                for (let i = 0; i < data.length; i += 4) {
+                    // 그레이스케일 (가중 평균)
+                    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+
+                    // 대비 향상
+                    let enhanced = ((gray - 128) * contrastFactor) + 128;
+                    enhanced = Math.max(0, Math.min(255, enhanced));
+
+                    data[i] = enhanced;     // R
+                    data[i + 1] = enhanced; // G
+                    data[i + 2] = enhanced; // B
+                    // Alpha는 유지
+                }
+
+                // 2. 간단한 이진화 (Otsu's method 간소화)
+                // 히스토그램 계산
+                const histogram = new Array(256).fill(0);
+                for (let i = 0; i < data.length; i += 4) {
+                    histogram[Math.round(data[i])]++;
+                }
+
+                // Otsu 임계값 계산
+                const total = canvas.width * canvas.height;
+                let sum = 0;
+                for (let i = 0; i < 256; i++) sum += i * histogram[i];
+
+                let sumB = 0, wB = 0, wF = 0;
+                let maxVariance = 0, threshold = 128;
+
+                for (let t = 0; t < 256; t++) {
+                    wB += histogram[t];
+                    if (wB === 0) continue;
+                    wF = total - wB;
+                    if (wF === 0) break;
+
+                    sumB += t * histogram[t];
+                    const mB = sumB / wB;
+                    const mF = (sum - sumB) / wF;
+                    const variance = wB * wF * (mB - mF) * (mB - mF);
+
+                    if (variance > maxVariance) {
+                        maxVariance = variance;
+                        threshold = t;
+                    }
+                }
+
+                // 이진화 적용 (부드러운 이진화)
+                for (let i = 0; i < data.length; i += 4) {
+                    const val = data[i];
+                    // 임계값 주변은 부드럽게 처리
+                    let newVal;
+                    if (val < threshold - 30) {
+                        newVal = 0;
+                    } else if (val > threshold + 30) {
+                        newVal = 255;
+                    } else {
+                        newVal = val < threshold ? 64 : 192;
+                    }
+                    data[i] = newVal;
+                    data[i + 1] = newVal;
+                    data[i + 2] = newVal;
+                }
+
+                ctx.putImageData(imageData, 0, 0);
+                resolve(canvas.toDataURL('image/png'));
+            };
+            img.onerror = () => resolve(imageData); // 실패시 원본 반환
+            img.src = imageData;
+        });
+    }
+
+    async scaleImageForOCR(imageData, minSize = 300) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                const { width, height } = img;
+
+                // 이미 충분히 크면 그대로 반환
+                if (width >= minSize && height >= minSize) {
+                    resolve(imageData);
+                    return;
+                }
+
+                // 스케일 계산 (최소 크기 보장)
+                const scale = Math.max(minSize / width, minSize / height, 1);
+                const newWidth = Math.round(width * scale);
+                const newHeight = Math.round(height * scale);
+
+                const canvas = document.createElement('canvas');
+                canvas.width = newWidth;
+                canvas.height = newHeight;
+                const ctx = canvas.getContext('2d');
+
+                // 고품질 스케일링
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(img, 0, 0, newWidth, newHeight);
+
+                resolve(canvas.toDataURL('image/png'));
+            };
+            img.onerror = () => resolve(imageData);
+            img.src = imageData;
+        });
+    }
+
+    // OCR 입력 이미지 크기 정규화 (모든 포맷에서 동일한 결과를 위해)
+    async normalizeImageForOCR(imageData) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                const { width, height } = img;
+
+                // 목표: 장축이 3000px이 되도록 스케일링 (OCR 정확도 향상)
+                const targetMaxDim = 3000;
+                const maxDim = Math.max(width, height);
+                const scale = targetMaxDim / maxDim;
+
+                const newWidth = Math.round(width * scale);
+                const newHeight = Math.round(height * scale);
+
+                const canvas = document.createElement('canvas');
+                canvas.width = newWidth;
+                canvas.height = newHeight;
+                const ctx = canvas.getContext('2d');
+
+                // 고품질 스케일링
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(img, 0, 0, newWidth, newHeight);
+
+                resolve(canvas.toDataURL('image/png'));
+            };
+            img.onerror = () => resolve(imageData);
+            img.src = imageData;
+        });
+    }
+
+    getOptimalPDFScale(page) {
+        const viewport = page.getViewport({ scale: 1 });
+        const { width, height } = viewport;
+
+        // 목표: 300 DPI 품질 (A4 기준 약 2480x3508 픽셀)
+        // 최소 스케일 2, 최대 스케일 4
+        const targetPixels = 2000;
+        const currentMax = Math.max(width, height);
+
+        let scale = targetPixels / currentMax;
+        scale = Math.max(2, Math.min(4, scale)); // 2~4 범위로 제한
+
+        return scale;
     }
 
     // ============ 공용 OCR 처리 함수 ============
@@ -128,16 +304,57 @@ class DocumentTextCounter {
 
     async performOCR(imageData) {
         try {
+            // 1. 이미지 크기 정규화 (모든 포맷에서 동일한 크기로)
+            const normalizedImage = await this.normalizeImageForOCR(imageData);
+
+            // 2. 이미지 전처리 (그레이스케일 + 대비 + 이진화)
+            const processedImage = await this.preprocessImageForOCR(normalizedImage);
+
+            // 3. Tesseract OCR 실행
             const result = await Tesseract.recognize(
-                imageData,
+                processedImage,
                 'kor+eng',
-                { logger: () => {} }
+                {
+                    logger: () => {},
+                    tessedit_pageseg_mode: '3',
+                    preserve_interword_spaces: '1',
+                }
             );
             return result.data.text || '';
         } catch (error) {
             console.warn('OCR 처리 실패:', error);
             return '';
         }
+    }
+
+    // ============ TXT 파일 분석 ============
+    async analyzeTXT(file) {
+        this.updateProgress(10, '텍스트 파일 읽는 중...');
+
+        const results = {
+            items: [],
+            totalTextChars: 0,
+            totalOcrChars: 0,
+            totalChars: 0
+        };
+
+        const text = await file.text();
+        const textCharCount = this.countChars(text);
+
+        results.items.push({
+            name: '본문',
+            textCharCount,
+            ocrText: '',
+            ocrCharCount: 0,
+            totalCharCount: textCharCount,
+            imageCount: 0
+        });
+
+        results.totalTextChars = textCharCount;
+        results.totalChars = textCharCount;
+
+        this.updateProgress(100, '분석 완료!');
+        return results;
     }
 
     // ============ 이미지 파일 분석 ============
@@ -204,6 +421,16 @@ class DocumentTextCounter {
         const images = await this.extractImagesFromZip(content, 'ppt/media/');
         this.updateProgress(20, `${images.length}개의 이미지 발견...`);
 
+        // 이미지 데이터 해시로 중복 제거 (같은 내용의 이미지는 한 번만 처리)
+        const ocrCache = new Map(); // 해시 -> OCR 결과
+        const imageHashMap = new Map(); // 이미지명 -> 해시
+
+        // 모든 이미지의 해시 계산 (픽셀 기반 - 크기 다른 동일 이미지도 감지)
+        for (const img of images) {
+            const hash = await this.hashImageData(img.data);
+            imageHashMap.set(img.name, hash);
+        }
+
         const slideImageMap = await this.mapImagesToSlides(content, slideFiles, images);
 
         const totalSteps = slideFiles.length;
@@ -225,14 +452,35 @@ class DocumentTextCounter {
             let ocrCharCount = 0;
 
             if (slideImages.length > 0) {
-                const ocrResult = await this.processImagesOCR(slideImages, (j, total) => {
-                    this.updateProgress(
-                        20 + (i / totalSteps) * 70,
-                        `슬라이드 ${slideNum} - 이미지 OCR (${j + 1}/${total})...`
-                    );
-                });
-                ocrText = ocrResult.ocrText;
-                ocrCharCount = ocrResult.ocrCharCount;
+                // 이 슬라이드의 고유 이미지만 처리 (해시 기반 중복 제거)
+                const processedHashes = new Set();
+                const ocrResults = [];
+
+                for (let j = 0; j < slideImages.length; j++) {
+                    const img = slideImages[j];
+                    const imgHash = imageHashMap.get(img.name);
+
+                    // 이미 이 슬라이드에서 처리한 동일 이미지 스킵
+                    if (processedHashes.has(imgHash)) {
+                        continue;
+                    }
+                    processedHashes.add(imgHash);
+
+                    if (ocrCache.has(imgHash)) {
+                        ocrResults.push(ocrCache.get(imgHash));
+                    } else {
+                        this.updateProgress(
+                            20 + (i / totalSteps) * 70,
+                            `슬라이드 ${slideNum} - 이미지 OCR...`
+                        );
+                        const imageData = typeof img === 'string' ? img : img.data;
+                        const result = await this.performOCR(imageData);
+                        ocrCache.set(imgHash, result);
+                        ocrResults.push(result);
+                    }
+                }
+                ocrText = ocrResults.filter(t => t).join('\n').trim();
+                ocrCharCount = this.countChars(ocrText);
             }
 
             results.items.push({
@@ -253,11 +501,44 @@ class DocumentTextCounter {
         return results;
     }
 
+    // 이미지 데이터의 픽셀 기반 해시 생성 (중복 감지용)
+    // 이미지를 32x32로 축소 후 픽셀 데이터로 해시 생성
+    // → 크기가 다른 동일 이미지도 같은 해시값
+    async hashImageData(dataUrl) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                // 고정 크기로 축소
+                const canvas = document.createElement('canvas');
+                canvas.width = 32;
+                canvas.height = 32;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, 32, 32);
+
+                // 픽셀 데이터로 해시 생성
+                const imageData = ctx.getImageData(0, 0, 32, 32);
+                let hash = '';
+                // 256개 샘플 포인트에서 픽셀 값 추출
+                for (let i = 0; i < imageData.data.length; i += 16) {
+                    hash += imageData.data[i].toString(16).padStart(2, '0');
+                }
+                resolve(hash);
+            };
+            img.onerror = () => {
+                // 실패 시 base64 길이로 폴백
+                const base64 = dataUrl.split(',')[1] || dataUrl;
+                resolve('err_' + base64.length.toString());
+            };
+            img.src = dataUrl;
+        });
+    }
+
     async mapImagesToSlides(zip, slideFiles, images) {
         const mapping = {};
 
         for (const slideFile of slideFiles) {
             mapping[slideFile] = [];
+            const addedImageNames = new Set(); // 슬라이드별 중복 방지
 
             const slideNum = slideFile.match(/slide(\d+)\.xml$/)[1];
             const relsFile = `ppt/slides/_rels/slide${slideNum}.xml.rels`;
@@ -272,9 +553,14 @@ class DocumentTextCounter {
                     const target = rel.getAttribute('Target');
                     if (target && target.includes('../media/')) {
                         const imageName = target.replace('../media/', '');
+                        // 이미 추가된 이미지는 스킵
+                        if (addedImageNames.has(imageName)) {
+                            continue;
+                        }
                         const image = images.find(img => img.name === imageName);
                         if (image) {
                             mapping[slideFile].push(image);
+                            addedImageNames.add(imageName);
                         }
                     }
                 }
@@ -554,7 +840,29 @@ class DocumentTextCounter {
             }
         }
 
-        // 각 이미지 추출
+        // 이미지가 없으면 바로 반환
+        if (imageNames.size === 0) {
+            return images;
+        }
+
+        // 페이지 렌더링으로 이미지 객체 로드 트리거
+        const scale = this.getOptimalPDFScale(page);
+        const viewport = page.getViewport({ scale });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 렌더링 실행 (이미지 객체 로드됨)
+        await page.render({
+            canvasContext: ctx,
+            viewport: viewport
+        }).promise;
+
+        // 각 이미지 추출 시도
         for (const imgName of imageNames) {
             try {
                 const imgData = await this.getPDFImageData(page, imgName);
@@ -565,20 +873,13 @@ class DocumentTextCounter {
                     }
                 }
             } catch (err) {
-                // 개별 이미지 추출 실패는 무시
+                // 개별 이미지 추출 실패 시 무시
             }
         }
 
-        // 이미지 추출 실패 시 페이지 전체 렌더링으로 폴백
+        // 개별 이미지 추출 실패 시 폴백: 페이지 전체 렌더링 사용
         if (images.length === 0 && imageNames.size > 0) {
-            try {
-                const dataUrl = await this.renderPDFPageToImage(page);
-                if (dataUrl) {
-                    images.push(dataUrl);
-                }
-            } catch (err) {
-                console.warn('페이지 렌더링 실패:', err);
-            }
+            images.push(canvas.toDataURL('image/png'));
         }
 
         return images;
@@ -605,19 +906,39 @@ class DocumentTextCounter {
     }
 
     convertPDFImageToDataURL(imgData) {
-        if (!imgData || !imgData.data || imgData.width <= 50 || imgData.height <= 50) {
+        if (!imgData) {
             return null;
         }
 
-        const canvas = document.createElement('canvas');
-        canvas.width = imgData.width;
-        canvas.height = imgData.height;
-        const ctx = canvas.getContext('2d');
-        const imageData = ctx.createImageData(imgData.width, imgData.height);
+        const { width, height, data, bitmap } = imgData;
 
-        const srcData = imgData.data;
+        // 매우 작은 이미지는 제외 (10px 이하)
+        if (width <= 10 || height <= 10) {
+            return null;
+        }
+
+        // 원본 크기 그대로 추출 (스케일링은 normalizeImageForOCR에서 통일)
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+
+        // ImageBitmap이 있으면 직접 그리기
+        if (bitmap) {
+            ctx.drawImage(bitmap, 0, 0, width, height);
+            return canvas.toDataURL('image/png');
+        }
+
+        // data 배열이 있으면 기존 방식으로 처리
+        if (!data) {
+            return null;
+        }
+
+        // 원본 크기로 이미지 데이터 생성 (스케일링은 normalizeImageForOCR에서 통일)
+        const imageData = ctx.createImageData(width, height);
+        const srcData = data;
         const dstData = imageData.data;
-        const pixelCount = imgData.width * imgData.height;
+        const pixelCount = width * height;
 
         if (srcData.length === pixelCount * 4) {
             dstData.set(srcData);
@@ -644,12 +965,17 @@ class DocumentTextCounter {
     }
 
     async renderPDFPageToImage(page) {
-        const scale = 2;
+        // 동적 스케일 계산 (300 DPI 목표)
+        const scale = this.getOptimalPDFScale(page);
         const viewport = page.getViewport({ scale });
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         const ctx = canvas.getContext('2d');
+
+        // 흰색 배경 설정 (투명 배경 문제 방지)
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         await page.render({
             canvasContext: ctx,
@@ -784,6 +1110,15 @@ class DocumentTextCounter {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    getImageSize(dataUrl) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve({ width: img.width, height: img.height });
+            img.onerror = () => resolve({ width: 0, height: 0 });
+            img.src = dataUrl;
+        });
     }
 
     showError(message) {
