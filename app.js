@@ -141,6 +141,7 @@ class DocumentTextCounter {
     }
 
     // ============ 이미지 전처리 함수 ============
+    // 아랍어, 힌디어 등 연결 문자 체계를 위해 최소한의 전처리만 수행
     async preprocessImageForOCR(imageData) {
         return new Promise((resolve) => {
             const img = new Image();
@@ -152,79 +153,28 @@ class DocumentTextCounter {
                 canvas.width = img.width;
                 canvas.height = img.height;
 
+                // 흰색 배경 설정 (투명 배경 문제 방지)
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
                 // 원본 이미지 그리기
                 ctx.drawImage(img, 0, 0);
 
                 // 이미지 데이터 가져오기
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const data = imageData.data;
+                const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imgData.data;
 
-                // 1. 그레이스케일 변환 + 대비 향상
-                const contrastFactor = 1.5; // 대비 증가 계수
+                // 가벼운 대비 향상만 적용 (이진화 제거 - 연결 문자 보존)
+                const contrastFactor = 1.2;
                 for (let i = 0; i < data.length; i += 4) {
-                    // 그레이스케일 (가중 평균)
-                    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-
                     // 대비 향상
-                    let enhanced = ((gray - 128) * contrastFactor) + 128;
-                    enhanced = Math.max(0, Math.min(255, enhanced));
-
-                    data[i] = enhanced;     // R
-                    data[i + 1] = enhanced; // G
-                    data[i + 2] = enhanced; // B
-                    // Alpha는 유지
-                }
-
-                // 2. 간단한 이진화 (Otsu's method 간소화)
-                // 히스토그램 계산
-                const histogram = new Array(256).fill(0);
-                for (let i = 0; i < data.length; i += 4) {
-                    histogram[Math.round(data[i])]++;
-                }
-
-                // Otsu 임계값 계산
-                const total = canvas.width * canvas.height;
-                let sum = 0;
-                for (let i = 0; i < 256; i++) sum += i * histogram[i];
-
-                let sumB = 0, wB = 0, wF = 0;
-                let maxVariance = 0, threshold = 128;
-
-                for (let t = 0; t < 256; t++) {
-                    wB += histogram[t];
-                    if (wB === 0) continue;
-                    wF = total - wB;
-                    if (wF === 0) break;
-
-                    sumB += t * histogram[t];
-                    const mB = sumB / wB;
-                    const mF = (sum - sumB) / wF;
-                    const variance = wB * wF * (mB - mF) * (mB - mF);
-
-                    if (variance > maxVariance) {
-                        maxVariance = variance;
-                        threshold = t;
+                    for (let c = 0; c < 3; c++) {
+                        let val = ((data[i + c] - 128) * contrastFactor) + 128;
+                        data[i + c] = Math.max(0, Math.min(255, val));
                     }
                 }
 
-                // 이진화 적용 (부드러운 이진화)
-                for (let i = 0; i < data.length; i += 4) {
-                    const val = data[i];
-                    // 임계값 주변은 부드럽게 처리
-                    let newVal;
-                    if (val < threshold - 30) {
-                        newVal = 0;
-                    } else if (val > threshold + 30) {
-                        newVal = 255;
-                    } else {
-                        newVal = val < threshold ? 64 : 192;
-                    }
-                    data[i] = newVal;
-                    data[i + 1] = newVal;
-                    data[i + 2] = newVal;
-                }
-
-                ctx.putImageData(imageData, 0, 0);
+                ctx.putImageData(imgData, 0, 0);
                 resolve(canvas.toDataURL('image/png'));
             };
             img.onerror = () => resolve(imageData); // 실패시 원본 반환
@@ -343,7 +293,7 @@ class DocumentTextCounter {
             // 1. 이미지 크기 정규화 (모든 포맷에서 동일한 크기로)
             const normalizedImage = await this.normalizeImageForOCR(imageData);
 
-            // 2. 이미지 전처리 (그레이스케일 + 대비 + 이진화)
+            // 2. 이미지 전처리 (대비 향상)
             const processedImage = await this.preprocessImageForOCR(normalizedImage);
 
             // 3. Tesseract OCR 실행 (선택된 언어만 사용)
@@ -355,8 +305,6 @@ class DocumentTextCounter {
                 langString,
                 {
                     logger: () => {},
-                    tessedit_pageseg_mode: '3',
-                    preserve_interword_spaces: '1',
                 }
             );
             return result.data.text || '';
@@ -1084,7 +1032,10 @@ class DocumentTextCounter {
             }
         }
 
-        return texts.join(' ');
+        // 텍스트를 공백 없이 연결 (아랍어 등 RTL 언어 지원)
+        // 각 텍스트 조각 사이에 공백 대신 빈 문자열로 연결하고,
+        // 연속된 공백은 하나로 정리
+        return texts.join('').replace(/\s+/g, ' ').trim();
     }
 
     countChars(text) {
@@ -1135,7 +1086,7 @@ class DocumentTextCounter {
                     ${item.ocrText ? `
                         <div class="ocr-preview">
                             <h4>OCR로 인식된 텍스트:</h4>
-                            <p>${this.escapeHtml(item.ocrText)}</p>
+                            <p dir="auto">${this.escapeHtml(item.ocrText)}</p>
                         </div>
                     ` : ''}
                 </div>

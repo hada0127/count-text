@@ -345,7 +345,9 @@ body {
     font-size: 0.85rem;
     line-height: 1.6;
     white-space: pre-wrap;
-    word-break: break-all;
+    word-break: break-word;
+    unicode-bidi: plaintext;
+    direction: auto;
 }
 
 .footer {
