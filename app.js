@@ -614,18 +614,29 @@ class DocumentTextCounter {
     }
 
     // ============ 공용 OCR 처리 함수 ============
-    async processImagesOCR(images, progressCallback) {
+    async processImagesOCR(images, progressCallback, baseProgress = 0, progressRange = 100) {
         let ocrText = '';
         let ocrCharCount = 0;
 
         for (let i = 0; i < images.length; i++) {
-            if (progressCallback) {
-                progressCallback(i, images.length);
-            }
+            const imageProgress = baseProgress + (i / images.length) * progressRange;
 
             try {
                 const imageData = typeof images[i] === 'string' ? images[i] : images[i].data;
-                const result = await this.performOCR(imageData);
+
+                // 상세 진행 상황 콜백
+                const ocrProgressCallback = (status) => {
+                    this.updateProgress(
+                        imageProgress + (progressRange / images.length) * 0.5,
+                        `이미지 ${i + 1}/${images.length}: ${status}`
+                    );
+                };
+
+                if (progressCallback) {
+                    progressCallback(i, images.length);
+                }
+
+                const result = await this.performOCR(imageData, ocrProgressCallback);
                 if (result) {
                     ocrText += result + '\n';
                 }
@@ -638,12 +649,14 @@ class DocumentTextCounter {
         return { ocrText: ocrText.trim(), ocrCharCount };
     }
 
-    async performOCR(imageData) {
+    async performOCR(imageData, progressCallback = null) {
         try {
             // 1. 이미지 크기 정규화 (모든 포맷에서 동일한 크기로)
+            if (progressCallback) progressCallback('이미지 정규화 중...');
             const normalizedImage = await this.normalizeImageForOCR(imageData);
 
             // 2. 이미지 전처리 (대비 향상)
+            if (progressCallback) progressCallback('이미지 전처리 중...');
             const processedImage = await this.preprocessImageForOCR(normalizedImage);
 
             // 3. Tesseract OCR 실행 (선택된 언어와 품질 적용)
@@ -656,7 +669,19 @@ class DocumentTextCounter {
                 langString,
                 {
                     langPath: langPath,
-                    logger: () => {},
+                    logger: (m) => {
+                        if (progressCallback && m.status) {
+                            const statusMap = {
+                                'loading tesseract core': '엔진 로딩 중...',
+                                'initializing tesseract': '엔진 초기화 중...',
+                                'loading language traineddata': '언어 데이터 로딩 중...',
+                                'initializing api': 'API 초기화 중...',
+                                'recognizing text': `텍스트 인식 중... ${Math.round((m.progress || 0) * 100)}%`
+                            };
+                            const statusText = statusMap[m.status] || m.status;
+                            progressCallback(statusText);
+                        }
+                    },
                 }
             );
             return result.data.text || '';
@@ -715,11 +740,13 @@ class DocumentTextCounter {
         // 파일을 Data URL로 변환
         const imageData = await this.fileToDataURL(file);
 
-        this.updateProgress(30, 'OCR 처리 중...');
+        // 상세 진행 상황 표시
+        const ocrProgressCallback = (status) => {
+            this.updateProgress(30, status);
+        };
 
-        const { ocrText, ocrCharCount } = await this.processImagesOCR([imageData], (i, total) => {
-            this.updateProgress(30 + (i / total) * 60, `OCR 처리 중...`);
-        });
+        const ocrText = await this.performOCR(imageData, ocrProgressCallback);
+        const ocrCharCount = this.countChars(ocrText);
 
         const spaceCount = this.countSpaces(ocrText);
 
@@ -820,12 +847,17 @@ class DocumentTextCounter {
                     if (ocrCache.has(imgHash)) {
                         ocrResults.push(ocrCache.get(imgHash));
                     } else {
-                        this.updateProgress(
-                            20 + (i / totalSteps) * 70,
-                            `슬라이드 ${slideNum} - 이미지 OCR...`
-                        );
                         const imageData = typeof img === 'string' ? img : img.data;
-                        const result = await this.performOCR(imageData);
+
+                        // 상세 진행 상황 콜백
+                        const ocrProgressCallback = (status) => {
+                            this.updateProgress(
+                                20 + (i / totalSteps) * 70,
+                                `슬라이드 ${slideNum}/${totalSteps} - 이미지 ${j + 1}: ${status}`
+                            );
+                        };
+
+                        const result = await this.performOCR(imageData, ocrProgressCallback);
                         ocrCache.set(imgHash, result);
                         ocrResults.push(result);
                     }
@@ -968,9 +1000,23 @@ class DocumentTextCounter {
         const images = await this.extractImagesFromZip(content, 'word/media/');
 
         if (images.length > 0) {
-            const { ocrText, ocrCharCount } = await this.processImagesOCR(images, (i, total) => {
-                this.updateProgress(30 + (i / total) * 60, `이미지 OCR (${i + 1}/${total})...`);
-            });
+            // 상세 진행 상황 표시를 위해 직접 OCR 수행
+            const ocrResults = [];
+            for (let imgIdx = 0; imgIdx < images.length; imgIdx++) {
+                const ocrProgressCallback = (status) => {
+                    this.updateProgress(
+                        30 + (imgIdx / images.length) * 60,
+                        `이미지 ${imgIdx + 1}/${images.length}: ${status}`
+                    );
+                };
+
+                const imgData = typeof images[imgIdx] === 'string' ? images[imgIdx] : images[imgIdx].data;
+                const result = await this.performOCR(imgData, ocrProgressCallback);
+                if (result) ocrResults.push(result);
+            }
+
+            const ocrText = ocrResults.join('\n').trim();
+            const ocrCharCount = this.countChars(ocrText);
 
             if (ocrCharCount > 0) {
                 const ocrSpaceCount = this.countSpaces(ocrText);
@@ -1048,9 +1094,23 @@ class DocumentTextCounter {
         const images = await this.extractImagesFromZip(content, 'xl/media/');
 
         if (images.length > 0) {
-            const { ocrText, ocrCharCount } = await this.processImagesOCR(images, (i, total) => {
-                this.updateProgress(80 + (i / total) * 15, `이미지 OCR (${i + 1}/${total})...`);
-            });
+            // 상세 진행 상황 표시를 위해 직접 OCR 수행
+            const ocrResults = [];
+            for (let imgIdx = 0; imgIdx < images.length; imgIdx++) {
+                const ocrProgressCallback = (status) => {
+                    this.updateProgress(
+                        80 + (imgIdx / images.length) * 15,
+                        `이미지 ${imgIdx + 1}/${images.length}: ${status}`
+                    );
+                };
+
+                const imgData = typeof images[imgIdx] === 'string' ? images[imgIdx] : images[imgIdx].data;
+                const result = await this.performOCR(imgData, ocrProgressCallback);
+                if (result) ocrResults.push(result);
+            }
+
+            const ocrText = ocrResults.join('\n').trim();
+            const ocrCharCount = this.countChars(ocrText);
 
             if (ocrCharCount > 0) {
                 const ocrSpaceCount = this.countSpaces(ocrText);
@@ -1174,14 +1234,22 @@ class DocumentTextCounter {
             let ocrSpaceCount = 0;
 
             if (images.length > 0) {
-                const ocrResult = await this.processImagesOCR(images, (i, total) => {
-                    this.updateProgress(
-                        10 + (pageNum / totalPages) * 80,
-                        `페이지 ${pageNum} - 이미지 OCR (${i + 1}/${total})...`
-                    );
-                });
-                ocrText = ocrResult.ocrText;
-                ocrCharCount = ocrResult.ocrCharCount;
+                // 상세 진행 상황 표시를 위해 직접 OCR 수행
+                const ocrResults = [];
+                for (let imgIdx = 0; imgIdx < images.length; imgIdx++) {
+                    const ocrProgressCallback = (status) => {
+                        this.updateProgress(
+                            10 + (pageNum / totalPages) * 80,
+                            `페이지 ${pageNum}/${totalPages} - 이미지 ${imgIdx + 1}/${images.length}: ${status}`
+                        );
+                    };
+
+                    const imgData = typeof images[imgIdx] === 'string' ? images[imgIdx] : images[imgIdx].data;
+                    const result = await this.performOCR(imgData, ocrProgressCallback);
+                    if (result) ocrResults.push(result);
+                }
+                ocrText = ocrResults.join('\n').trim();
+                ocrCharCount = this.countChars(ocrText);
                 ocrSpaceCount = this.countSpaces(ocrText);
             }
 
