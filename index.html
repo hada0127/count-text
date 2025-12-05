@@ -60,6 +60,7 @@
             <script type="text/javascript" src="//t1.daumcdn.net/kas/static/ba.min.js" async></script>
         </div>
 
+        <!-- 1. 파일 업로드 영역 -->
         <div class="upload-card">
             <div class="drop-zone" id="dropZone">
                 <div class="drop-zone-icon">📄</div>
@@ -75,17 +76,16 @@
                 <span id="fileName"></span>
             </div>
 
-            <div class="progress-section" id="progressSection">
-                <div class="progress-bar">
-                    <div class="progress-fill" id="progressFill"></div>
-                </div>
-                <p class="progress-text" id="progressText">분석 준비 중...</p>
-            </div>
-
             <div class="error-message" id="errorMessage"></div>
+        </div>
 
-            <div class="ocr-settings">
-                <h4 class="ocr-settings-title">OCR 언어 설정</h4>
+        <!-- 2. 옵션 설정 영역 -->
+        <div class="options-card">
+            <h3 class="options-title">분석 옵션</h3>
+
+            <!-- 언어 설정 -->
+            <div class="option-section">
+                <h4 class="option-section-title">OCR 언어</h4>
                 <div class="language-grid" id="languageGrid">
                     <label class="language-option">
                         <input type="checkbox" value="kor" checked> 한국어
@@ -134,8 +134,80 @@
                     </label>
                 </div>
             </div>
+
+            <!-- 품질 설정 -->
+            <div class="option-section">
+                <h4 class="option-section-title">OCR 품질</h4>
+                <div class="quality-options" id="qualityOptions">
+                    <label class="quality-option">
+                        <input type="radio" name="ocrQuality" value="fast">
+                        <span class="quality-label">
+                            <span class="quality-name">빠름</span>
+                            <span class="quality-desc">속도 우선</span>
+                        </span>
+                    </label>
+                    <label class="quality-option">
+                        <input type="radio" name="ocrQuality" value="balanced" checked>
+                        <span class="quality-label">
+                            <span class="quality-name">보통</span>
+                            <span class="quality-desc">권장</span>
+                        </span>
+                    </label>
+                    <label class="quality-option">
+                        <input type="radio" name="ocrQuality" value="accurate">
+                        <span class="quality-label">
+                            <span class="quality-name">정확</span>
+                            <span class="quality-desc">느림</span>
+                        </span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- 공백 포함 설정 -->
+            <div class="option-section">
+                <h4 class="option-section-title">글자수 계산</h4>
+                <label class="count-option">
+                    <input type="checkbox" id="includeSpaces"> 공백 포함하여 계산
+                </label>
+            </div>
+
+            <!-- 이미지 전처리 설정 -->
+            <div class="option-section">
+                <h4 class="option-section-title">이미지 전처리</h4>
+                <div class="preprocess-options" id="preprocessOptions">
+                    <label class="preprocess-option">
+                        <input type="checkbox" value="grayscale" checked> 그레이스케일
+                    </label>
+                    <label class="preprocess-option">
+                        <input type="checkbox" value="threshold" checked> 이진화
+                    </label>
+                    <label class="preprocess-option">
+                        <input type="checkbox" value="denoise" checked> 노이즈 제거
+                    </label>
+                    <label class="preprocess-option">
+                        <input type="checkbox" value="morphology"> 모폴로지
+                    </label>
+                    <label class="preprocess-option">
+                        <input type="checkbox" value="deskew"> 기울기 보정
+                    </label>
+                </div>
+            </div>
         </div>
 
+        <!-- 3. 실행 버튼 / 진행바 영역 -->
+        <div class="action-card">
+            <div class="progress-section" id="progressSection">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <p class="progress-text" id="progressText">분석 준비 중...</p>
+            </div>
+            <button type="button" class="run-btn" id="runBtn" disabled>
+                분석 시작
+            </button>
+        </div>
+
+        <!-- 4. 결과 영역 -->
         <div class="results-card" id="resultsSection">
             <div class="summary-grid">
                 <div class="summary-item">
@@ -149,6 +221,10 @@
                 <div class="summary-item secondary">
                     <span class="summary-number" id="ocrChars">0</span>
                     <span class="summary-label">이미지 내 글자수</span>
+                </div>
+                <div class="summary-item secondary" id="spaceCountContainer" style="display: none;">
+                    <span class="summary-number" id="spaceChars">0</span>
+                    <span class="summary-label">공백 수</span>
                 </div>
             </div>
 
@@ -167,6 +243,15 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <!-- Tesseract.js for OCR -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <!-- OpenCV.js for image preprocessing -->
+    <script async src="https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/opencv.js" onload="onOpenCvReady()"></script>
+    <script>
+        var cvReady = false;
+        function onOpenCvReady() {
+            cvReady = true;
+            console.log('OpenCV.js is ready');
+        }
+    </script>
 
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';

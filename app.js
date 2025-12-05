@@ -14,6 +14,20 @@ class DocumentTextCounter {
         this.slidesContainer = document.getElementById('slidesContainer');
         this.sectionTitle = document.getElementById('sectionTitle');
         this.languageGrid = document.getElementById('languageGrid');
+        this.qualityOptions = document.getElementById('qualityOptions');
+        this.preprocessOptions = document.getElementById('preprocessOptions');
+        this.includeSpacesCheckbox = document.getElementById('includeSpaces');
+        this.spaceCountContainer = document.getElementById('spaceCountContainer');
+        this.runBtn = document.getElementById('runBtn');
+
+        // 현재 분석 중인 파일 저장
+        this.currentFile = null;
+        this.isAnalyzed = false; // 분석 완료 여부
+        this.optionsChanged = false; // 옵션 변경 여부
+        this.lastResults = null; // 마지막 분석 결과
+
+        // 기본 전처리 옵션
+        this.defaultPreprocessOptions = ['grayscale', 'threshold', 'denoise'];
 
         this.imageFormats = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'webp'];
         this.supportedFormats = ['pptx', 'docx', 'xlsx', 'pdf', 'txt', ...this.imageFormats];
@@ -22,8 +36,23 @@ class DocumentTextCounter {
         // 기본 언어: 한국어, 영어
         this.defaultLanguages = ['kor', 'eng'];
 
+        // 기본 품질: balanced
+        this.defaultQuality = 'balanced';
+
+        // 품질별 tessdata 경로 설정 (jsdelivr CDN 사용 - 더 안정적)
+        // fast: tessdata_fast (빠른 속도)
+        // balanced: tessdata (기본, LSTM+레거시)
+        // accurate: tessdata_best (최고 정확도)
+        this.qualityPaths = {
+            fast: 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0',
+            balanced: 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0',
+            accurate: 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_best'
+        };
+
         this.initEventListeners();
         this.loadLanguageSettings();
+        this.loadQualitySettings();
+        this.loadPreprocessSettings();
     }
 
     initEventListeners() {
@@ -52,10 +81,70 @@ class DocumentTextCounter {
             }
         });
 
-        // 언어 선택 변경 시 저장
+        // 실행 버튼 클릭
+        this.runBtn.addEventListener('click', () => {
+            this.runAnalysis();
+        });
+
+        // 옵션 변경 감지
         this.languageGrid.addEventListener('change', () => {
             this.saveLanguageSettings();
+            this.markOptionsChanged();
         });
+
+        this.qualityOptions.addEventListener('change', () => {
+            this.saveQualitySettings();
+            this.markOptionsChanged();
+        });
+
+        this.preprocessOptions.addEventListener('change', () => {
+            this.savePreprocessSettings();
+            this.markOptionsChanged();
+        });
+
+        this.includeSpacesCheckbox.addEventListener('change', () => {
+            this.markOptionsChanged();
+            // 공백 포함 옵션은 결과만 다시 표시
+            if (this.isAnalyzed && this.lastResults) {
+                this.displayResults(this.lastResults);
+            }
+        });
+    }
+
+    // 분석 실행
+    runAnalysis() {
+        if (this.currentFile) {
+            this.processFile(this.currentFile);
+        }
+    }
+
+    // 옵션 변경 표시
+    markOptionsChanged() {
+        if (this.isAnalyzed) {
+            this.optionsChanged = true;
+            this.updateRunButton();
+        }
+    }
+
+    // 실행 버튼 상태 업데이트
+    updateRunButton() {
+        if (!this.currentFile) {
+            this.runBtn.disabled = true;
+            this.runBtn.textContent = '분석 시작';
+            this.runBtn.classList.remove('rerun');
+        } else if (this.isAnalyzed && this.optionsChanged) {
+            this.runBtn.disabled = false;
+            this.runBtn.textContent = '옵션 변경됨 - 다시 분석';
+            this.runBtn.classList.add('rerun');
+        } else if (this.isAnalyzed) {
+            this.runBtn.disabled = false;
+            this.runBtn.textContent = '다시 분석';
+            this.runBtn.classList.add('rerun');
+        } else {
+            this.runBtn.disabled = false;
+            this.runBtn.textContent = '분석 시작';
+            this.runBtn.classList.remove('rerun');
+        }
     }
 
     // 언어 설정 로드
@@ -84,6 +173,59 @@ class DocumentTextCounter {
         return languages.length > 0 ? languages : this.defaultLanguages;
     }
 
+    // 품질 설정 로드
+    loadQualitySettings() {
+        const saved = localStorage.getItem('ocrQuality');
+        const quality = saved || this.defaultQuality;
+
+        const radio = this.qualityOptions.querySelector(`input[value="${quality}"]`);
+        if (radio) {
+            radio.checked = true;
+        }
+    }
+
+    // 품질 설정 저장
+    saveQualitySettings() {
+        const quality = this.getSelectedQuality();
+        localStorage.setItem('ocrQuality', quality);
+    }
+
+    // 선택된 품질 가져오기
+    getSelectedQuality() {
+        const radio = this.qualityOptions.querySelector('input[name="ocrQuality"]:checked');
+        return radio ? radio.value : this.defaultQuality;
+    }
+
+    // 현재 품질에 맞는 langPath 가져오기
+    getLangPath() {
+        const quality = this.getSelectedQuality();
+        return this.qualityPaths[quality] || this.qualityPaths.balanced;
+    }
+
+    // 전처리 설정 로드
+    loadPreprocessSettings() {
+        const saved = localStorage.getItem('ocrPreprocess');
+        const options = saved ? JSON.parse(saved) : this.defaultPreprocessOptions;
+
+        const checkboxes = this.preprocessOptions.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(checkbox => {
+            checkbox.checked = options.includes(checkbox.value);
+        });
+    }
+
+    // 전처리 설정 저장
+    savePreprocessSettings() {
+        const options = this.getSelectedPreprocessOptions();
+        localStorage.setItem('ocrPreprocess', JSON.stringify(options));
+    }
+
+    // 선택된 전처리 옵션 가져오기
+    getSelectedPreprocessOptions() {
+        const checkboxes = this.preprocessOptions.querySelectorAll('input[type="checkbox"]:checked');
+        return Array.from(checkboxes).map(cb => cb.value);
+    }
+
+    // 파일 선택 처리 (UI만 업데이트, 바로 분석 시작)
     async handleFile(file) {
         const ext = file.name.toLowerCase().split('.').pop();
 
@@ -97,6 +239,12 @@ class DocumentTextCounter {
             return;
         }
 
+        // 현재 파일 저장
+        this.currentFile = file;
+        this.isAnalyzed = false;
+        this.optionsChanged = false;
+        this.lastResults = null;
+
         // UI 초기화
         this.hideError();
         this.fileInfo.classList.add('show');
@@ -107,9 +255,25 @@ class DocumentTextCounter {
         this.fileTypeIcon.textContent = ext.toUpperCase();
         this.fileTypeIcon.className = `file-type-icon file-type-${iconType}`;
 
+        // 버튼 상태 업데이트
+        this.updateRunButton();
+
+        // 바로 분석 시작
+        this.processFile(file);
+    }
+
+    // 실제 파일 분석 처리
+    async processFile(file) {
+        const ext = file.name.toLowerCase().split('.').pop();
+
+        // 진행바 표시, 버튼 숨기기
         this.progressSection.classList.add('show');
+        this.runBtn.classList.add('hide');
         this.resultsSection.classList.remove('show');
         this.updateProgress(0, '파일 읽는 중...');
+
+        // 진행바 영역으로 스크롤
+        this.progressSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
         try {
             let results;
@@ -132,42 +296,228 @@ class DocumentTextCounter {
                 results = await this.analyzeImage(file);
                 this.sectionTitle.textContent = '이미지 분석 결과';
             }
+            // 분석 완료
+            this.lastResults = results;
+            this.isAnalyzed = true;
+            this.optionsChanged = false;
             this.displayResults(results);
         } catch (error) {
             console.error('분석 오류:', error);
             this.showError(`파일 분석 중 오류가 발생했습니다: ${error.message}`);
             this.progressSection.classList.remove('show');
+            this.runBtn.classList.remove('hide');
+            this.updateRunButton();
         }
     }
 
     // ============ 이미지 전처리 함수 ============
-    // 아랍어, 힌디어 등 연결 문자 체계를 위해 최소한의 전처리만 수행
+    // OpenCV.js를 사용한 고급 이미지 전처리
     async preprocessImageForOCR(imageData) {
+        const options = this.getSelectedPreprocessOptions();
+
+        // OpenCV가 로드되지 않았거나 전처리 옵션이 없으면 기본 전처리 사용
+        if (typeof cv === 'undefined' || !cvReady || options.length === 0) {
+            return this.basicPreprocessImage(imageData);
+        }
+
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                try {
+                    // Canvas에 이미지 그리기
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+
+                    // 흰색 배경 설정
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0);
+
+                    // OpenCV Mat 생성
+                    let src = cv.imread(canvas);
+                    let dst = new cv.Mat();
+
+                    // 1. 그레이스케일 변환
+                    if (options.includes('grayscale')) {
+                        cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
+                        src.delete();
+                        src = dst.clone();
+                    }
+
+                    // 2. 노이즈 제거 (가우시안 블러)
+                    if (options.includes('denoise')) {
+                        const ksize = new cv.Size(3, 3);
+                        if (src.channels() === 1) {
+                            cv.GaussianBlur(src, dst, ksize, 0);
+                        } else {
+                            cv.GaussianBlur(src, dst, ksize, 0);
+                        }
+                        src.delete();
+                        src = dst.clone();
+                    }
+
+                    // 3. 적응형 이진화 (Adaptive Threshold)
+                    if (options.includes('threshold')) {
+                        // 그레이스케일이 아니면 먼저 변환
+                        if (src.channels() !== 1) {
+                            cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
+                            src.delete();
+                            src = dst.clone();
+                        }
+                        cv.adaptiveThreshold(
+                            src, dst, 255,
+                            cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+                            cv.THRESH_BINARY,
+                            11, // blockSize (홀수)
+                            2   // C (평균에서 뺄 상수)
+                        );
+                        src.delete();
+                        src = dst.clone();
+                    }
+
+                    // 4. 모폴로지 연산 (침식 후 팽창 = Opening)
+                    if (options.includes('morphology')) {
+                        // 그레이스케일이 아니면 먼저 변환
+                        if (src.channels() !== 1) {
+                            cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
+                            src.delete();
+                            src = dst.clone();
+                        }
+                        const kernel = cv.getStructuringElement(
+                            cv.MORPH_RECT,
+                            new cv.Size(2, 2)
+                        );
+                        // Opening (노이즈 제거)
+                        cv.morphologyEx(src, dst, cv.MORPH_OPEN, kernel);
+                        kernel.delete();
+                        src.delete();
+                        src = dst.clone();
+                    }
+
+                    // 5. 기울기 보정 (Deskew)
+                    if (options.includes('deskew')) {
+                        const deskewed = this.deskewImage(src);
+                        if (deskewed) {
+                            src.delete();
+                            src = deskewed;
+                        }
+                    }
+
+                    // 결과를 Canvas에 출력
+                    const outputCanvas = document.createElement('canvas');
+                    cv.imshow(outputCanvas, src);
+
+                    // 메모리 정리
+                    src.delete();
+                    dst.delete();
+
+                    resolve(outputCanvas.toDataURL('image/png'));
+                } catch (error) {
+                    console.warn('OpenCV 전처리 실패, 기본 전처리 사용:', error);
+                    this.basicPreprocessImage(imageData).then(resolve);
+                }
+            };
+            img.onerror = () => resolve(imageData);
+            img.src = imageData;
+        });
+    }
+
+    // 기울기 보정 (Deskew) - Hough 변환 사용
+    deskewImage(src) {
+        try {
+            let gray = src;
+
+            // 그레이스케일이 아니면 변환
+            if (src.channels() !== 1) {
+                gray = new cv.Mat();
+                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+            }
+
+            // 에지 검출
+            const edges = new cv.Mat();
+            cv.Canny(gray, edges, 50, 150, 3);
+
+            // Hough 선 검출
+            const lines = new cv.Mat();
+            cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 100, 50, 10);
+
+            // 각도 계산
+            let angles = [];
+            for (let i = 0; i < lines.rows; i++) {
+                const x1 = lines.data32S[i * 4];
+                const y1 = lines.data32S[i * 4 + 1];
+                const x2 = lines.data32S[i * 4 + 2];
+                const y2 = lines.data32S[i * 4 + 3];
+
+                const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+                // -45도 ~ 45도 범위의 각도만 사용
+                if (Math.abs(angle) < 45) {
+                    angles.push(angle);
+                }
+            }
+
+            edges.delete();
+            lines.delete();
+            if (gray !== src) gray.delete();
+
+            if (angles.length === 0) {
+                return null; // 회전 불필요
+            }
+
+            // 중앙값 각도 사용
+            angles.sort((a, b) => a - b);
+            const medianAngle = angles[Math.floor(angles.length / 2)];
+
+            // 회전 각도가 너무 작으면 회전하지 않음
+            if (Math.abs(medianAngle) < 0.5) {
+                return null;
+            }
+
+            // 이미지 회전
+            const center = new cv.Point(src.cols / 2, src.rows / 2);
+            const M = cv.getRotationMatrix2D(center, medianAngle, 1);
+            const rotated = new cv.Mat();
+            cv.warpAffine(
+                src, rotated, M,
+                new cv.Size(src.cols, src.rows),
+                cv.INTER_LINEAR,
+                cv.BORDER_CONSTANT,
+                new cv.Scalar(255, 255, 255, 255)
+            );
+            M.delete();
+
+            return rotated;
+        } catch (error) {
+            console.warn('기울기 보정 실패:', error);
+            return null;
+        }
+    }
+
+    // 기본 전처리 (OpenCV 없이)
+    async basicPreprocessImage(imageData) {
         return new Promise((resolve) => {
             const img = new Image();
             img.onload = () => {
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
 
-                // 이미지 크기 설정
                 canvas.width = img.width;
                 canvas.height = img.height;
 
-                // 흰색 배경 설정 (투명 배경 문제 방지)
+                // 흰색 배경 설정
                 ctx.fillStyle = '#FFFFFF';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-                // 원본 이미지 그리기
                 ctx.drawImage(img, 0, 0);
 
                 // 이미지 데이터 가져오기
                 const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 const data = imgData.data;
 
-                // 가벼운 대비 향상만 적용 (이진화 제거 - 연결 문자 보존)
+                // 대비 향상
                 const contrastFactor = 1.2;
                 for (let i = 0; i < data.length; i += 4) {
-                    // 대비 향상
                     for (let c = 0; c < 3; c++) {
                         let val = ((data[i + c] - 128) * contrastFactor) + 128;
                         data[i + c] = Math.max(0, Math.min(255, val));
@@ -177,7 +527,7 @@ class DocumentTextCounter {
                 ctx.putImageData(imgData, 0, 0);
                 resolve(canvas.toDataURL('image/png'));
             };
-            img.onerror = () => resolve(imageData); // 실패시 원본 반환
+            img.onerror = () => resolve(imageData);
             img.src = imageData;
         });
     }
@@ -296,14 +646,16 @@ class DocumentTextCounter {
             // 2. 이미지 전처리 (대비 향상)
             const processedImage = await this.preprocessImageForOCR(normalizedImage);
 
-            // 3. Tesseract OCR 실행 (선택된 언어만 사용)
+            // 3. Tesseract OCR 실행 (선택된 언어와 품질 적용)
             const selectedLanguages = this.getSelectedLanguages();
             const langString = selectedLanguages.join('+');
+            const langPath = this.getLangPath();
 
             const result = await Tesseract.recognize(
                 processedImage,
                 langString,
                 {
+                    langPath: langPath,
                     logger: () => {},
                 }
             );
@@ -322,11 +674,13 @@ class DocumentTextCounter {
             items: [],
             totalTextChars: 0,
             totalOcrChars: 0,
-            totalChars: 0
+            totalChars: 0,
+            totalSpaces: 0
         };
 
         const text = await file.text();
         const textCharCount = this.countChars(text);
+        const spaceCount = this.countSpaces(text);
 
         results.items.push({
             name: '본문',
@@ -334,11 +688,13 @@ class DocumentTextCounter {
             ocrText: '',
             ocrCharCount: 0,
             totalCharCount: textCharCount,
-            imageCount: 0
+            imageCount: 0,
+            spaceCount
         });
 
         results.totalTextChars = textCharCount;
         results.totalChars = textCharCount;
+        results.totalSpaces = spaceCount;
 
         this.updateProgress(100, '분석 완료!');
         return results;
@@ -352,7 +708,8 @@ class DocumentTextCounter {
             items: [],
             totalTextChars: 0,
             totalOcrChars: 0,
-            totalChars: 0
+            totalChars: 0,
+            totalSpaces: 0
         };
 
         // 파일을 Data URL로 변환
@@ -364,17 +721,21 @@ class DocumentTextCounter {
             this.updateProgress(30 + (i / total) * 60, `OCR 처리 중...`);
         });
 
+        const spaceCount = this.countSpaces(ocrText);
+
         results.items.push({
             name: '이미지',
             textCharCount: 0,
             ocrText: ocrText,
             ocrCharCount: ocrCharCount,
             totalCharCount: ocrCharCount,
-            imageCount: 1
+            imageCount: 1,
+            spaceCount
         });
 
         results.totalOcrChars = ocrCharCount;
         results.totalChars = ocrCharCount;
+        results.totalSpaces = spaceCount;
 
         this.updateProgress(100, '분석 완료!');
         return results;
@@ -402,7 +763,8 @@ class DocumentTextCounter {
             items: [],
             totalTextChars: 0,
             totalOcrChars: 0,
-            totalChars: 0
+            totalChars: 0,
+            totalSpaces: 0
         };
 
         const images = await this.extractImagesFromZip(content, 'ppt/media/');
@@ -433,10 +795,12 @@ class DocumentTextCounter {
             const xmlContent = await content.files[slideFile].async('text');
             const textContent = this.extractTextFromXML(xmlContent, 'a:t');
             const textCharCount = this.countChars(textContent);
+            const textSpaceCount = this.countSpaces(textContent);
 
             const slideImages = slideImageMap[slideFile] || [];
             let ocrText = '';
             let ocrCharCount = 0;
+            let ocrSpaceCount = 0;
 
             if (slideImages.length > 0) {
                 // 이 슬라이드의 고유 이미지만 처리 (해시 기반 중복 제거)
@@ -468,7 +832,10 @@ class DocumentTextCounter {
                 }
                 ocrText = ocrResults.filter(t => t).join('\n').trim();
                 ocrCharCount = this.countChars(ocrText);
+                ocrSpaceCount = this.countSpaces(ocrText);
             }
+
+            const spaceCount = textSpaceCount + ocrSpaceCount;
 
             results.items.push({
                 name: `슬라이드 ${slideNum}`,
@@ -476,11 +843,13 @@ class DocumentTextCounter {
                 ocrText,
                 ocrCharCount,
                 totalCharCount: textCharCount + ocrCharCount,
-                imageCount: slideImages.length
+                imageCount: slideImages.length,
+                spaceCount
             });
 
             results.totalTextChars += textCharCount;
             results.totalOcrChars += ocrCharCount;
+            results.totalSpaces += spaceCount;
         }
 
         results.totalChars = results.totalTextChars + results.totalOcrChars;
@@ -568,13 +937,17 @@ class DocumentTextCounter {
             items: [],
             totalTextChars: 0,
             totalOcrChars: 0,
-            totalChars: 0
+            totalChars: 0,
+            totalSpaces: 0
         };
+
+        let textSpaceCount = 0;
 
         if (content.files['word/document.xml']) {
             const xmlContent = await content.files['word/document.xml'].async('text');
             const textContent = this.extractTextFromXML(xmlContent, 'w:t');
             const textCharCount = this.countChars(textContent);
+            textSpaceCount = this.countSpaces(textContent);
 
             results.items.push({
                 name: '본문',
@@ -582,10 +955,12 @@ class DocumentTextCounter {
                 ocrText: '',
                 ocrCharCount: 0,
                 totalCharCount: textCharCount,
-                imageCount: 0
+                imageCount: 0,
+                spaceCount: textSpaceCount
             });
 
             results.totalTextChars += textCharCount;
+            results.totalSpaces += textSpaceCount;
         }
 
         this.updateProgress(30, '이미지 추출 중...');
@@ -598,16 +973,19 @@ class DocumentTextCounter {
             });
 
             if (ocrCharCount > 0) {
+                const ocrSpaceCount = this.countSpaces(ocrText);
                 results.items.push({
                     name: '이미지 내 텍스트',
                     textCharCount: 0,
                     ocrText,
                     ocrCharCount,
                     totalCharCount: ocrCharCount,
-                    imageCount: images.length
+                    imageCount: images.length,
+                    spaceCount: ocrSpaceCount
                 });
 
                 results.totalOcrChars += ocrCharCount;
+                results.totalSpaces += ocrSpaceCount;
             }
         }
 
@@ -627,7 +1005,8 @@ class DocumentTextCounter {
             items: [],
             totalTextChars: 0,
             totalOcrChars: 0,
-            totalChars: 0
+            totalChars: 0,
+            totalSpaces: 0
         };
 
         let sharedStrings = [];
@@ -649,6 +1028,7 @@ class DocumentTextCounter {
             const xmlContent = await content.files[sheetFile].async('text');
             const textContent = this.extractXLSXText(xmlContent, sharedStrings);
             const textCharCount = this.countChars(textContent);
+            const spaceCount = this.countSpaces(textContent);
 
             results.items.push({
                 name: sheetName,
@@ -656,10 +1036,12 @@ class DocumentTextCounter {
                 ocrText: '',
                 ocrCharCount: 0,
                 totalCharCount: textCharCount,
-                imageCount: 0
+                imageCount: 0,
+                spaceCount
             });
 
             results.totalTextChars += textCharCount;
+            results.totalSpaces += spaceCount;
         }
 
         this.updateProgress(80, '이미지 추출 중...');
@@ -671,16 +1053,19 @@ class DocumentTextCounter {
             });
 
             if (ocrCharCount > 0) {
+                const ocrSpaceCount = this.countSpaces(ocrText);
                 results.items.push({
                     name: '이미지 내 텍스트',
                     textCharCount: 0,
                     ocrText,
                     ocrCharCount,
                     totalCharCount: ocrCharCount,
-                    imageCount: images.length
+                    imageCount: images.length,
+                    spaceCount: ocrSpaceCount
                 });
 
                 results.totalOcrChars += ocrCharCount;
+                results.totalSpaces += ocrSpaceCount;
             }
         }
 
@@ -762,7 +1147,8 @@ class DocumentTextCounter {
             items: [],
             totalTextChars: 0,
             totalOcrChars: 0,
-            totalChars: 0
+            totalChars: 0,
+            totalSpaces: 0
         };
 
         const totalPages = pdf.numPages;
@@ -779,11 +1165,13 @@ class DocumentTextCounter {
             const textContent = await page.getTextContent();
             const pageText = textContent.items.map(item => item.str).join('');
             const textCharCount = this.countChars(pageText);
+            const textSpaceCount = this.countSpaces(pageText);
 
             // 이미지 추출
             const images = await this.extractPDFPageImages(page);
             let ocrText = '';
             let ocrCharCount = 0;
+            let ocrSpaceCount = 0;
 
             if (images.length > 0) {
                 const ocrResult = await this.processImagesOCR(images, (i, total) => {
@@ -794,7 +1182,10 @@ class DocumentTextCounter {
                 });
                 ocrText = ocrResult.ocrText;
                 ocrCharCount = ocrResult.ocrCharCount;
+                ocrSpaceCount = this.countSpaces(ocrText);
             }
+
+            const spaceCount = textSpaceCount + ocrSpaceCount;
 
             results.items.push({
                 name: `페이지 ${pageNum}`,
@@ -802,11 +1193,13 @@ class DocumentTextCounter {
                 ocrText,
                 ocrCharCount,
                 totalCharCount: textCharCount + ocrCharCount,
-                imageCount: images.length
+                imageCount: images.length,
+                spaceCount
             });
 
             results.totalTextChars += textCharCount;
             results.totalOcrChars += ocrCharCount;
+            results.totalSpaces += spaceCount;
         }
 
         results.totalChars = results.totalTextChars + results.totalOcrChars;
@@ -1042,6 +1435,18 @@ class DocumentTextCounter {
         return text.replace(/\s/g, '').length;
     }
 
+    countSpaces(text) {
+        return (text.match(/\s/g) || []).length;
+    }
+
+    countCharsWithSpaces(text) {
+        return text.length;
+    }
+
+    isIncludeSpaces() {
+        return this.includeSpacesCheckbox && this.includeSpacesCheckbox.checked;
+    }
+
     updateProgress(percent, text) {
         this.progressFill.style.width = `${percent}%`;
         this.progressText.textContent = text;
@@ -1049,11 +1454,26 @@ class DocumentTextCounter {
 
     displayResults(results) {
         this.progressSection.classList.remove('show');
+        this.runBtn.classList.remove('hide');
         this.resultsSection.classList.add('show');
+        this.updateRunButton();
 
-        document.getElementById('totalChars').textContent = results.totalChars.toLocaleString();
+        const includeSpaces = this.isIncludeSpaces();
+        const totalSpaces = results.totalSpaces || 0;
+
+        // 총 글자수 표시 (공백 포함 옵션에 따라)
+        const displayTotalChars = includeSpaces ? results.totalChars + totalSpaces : results.totalChars;
+        document.getElementById('totalChars').textContent = displayTotalChars.toLocaleString();
         document.getElementById('textChars').textContent = results.totalTextChars.toLocaleString();
         document.getElementById('ocrChars').textContent = results.totalOcrChars.toLocaleString();
+
+        // 공백 수 표시 (체크 시에만)
+        if (includeSpaces) {
+            this.spaceCountContainer.style.display = '';
+            document.getElementById('spaceChars').textContent = totalSpaces.toLocaleString();
+        } else {
+            this.spaceCountContainer.style.display = 'none';
+        }
 
         this.slidesContainer.innerHTML = '';
 
@@ -1061,16 +1481,25 @@ class DocumentTextCounter {
             const card = document.createElement('div');
             card.className = 'detail-card';
 
+            const itemSpaceCount = item.spaceCount || 0;
+            const displayItemTotal = includeSpaces ? item.totalCharCount + itemSpaceCount : item.totalCharCount;
+
             card.innerHTML = `
                 <div class="detail-header">
                     <span class="detail-title">${item.name}</span>
-                    <span class="detail-count">${item.totalCharCount.toLocaleString()}자</span>
+                    <span class="detail-count">${displayItemTotal.toLocaleString()}자</span>
                 </div>
                 <div class="detail-body">
                     <div class="detail-row">
                         <span class="detail-label">텍스트 글자수</span>
                         <span class="detail-value">${item.textCharCount.toLocaleString()}자</span>
                     </div>
+                    ${includeSpaces ? `
+                        <div class="detail-row">
+                            <span class="detail-label">공백 수</span>
+                            <span class="detail-value">${itemSpaceCount.toLocaleString()}개</span>
+                        </div>
+                    ` : ''}
                     ${item.imageCount > 0 ? `
                         <div class="detail-row">
                             <span class="detail-label">이미지 수</span>
